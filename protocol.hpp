@@ -1,17 +1,9 @@
-#include <iostream>
-#include <QApplication>
 #include <QFile>
-#include <QLabel>
-#include <QPushButton>
-#include <QResizeEvent>
-#include <QScrollArea>
-#include <QStringBuilder>
-#include <QStyleOption>
+#include <QTextDocument>
 #include <QTextEdit>
-#include <QTextTable>
-#include <QVBoxLayout>
-#include <QWidget>
+// #include <QTextTable>
 #include <QXmlStreamReader>
+#include <QtCore>
 
 typedef short ProtocolVersion;
 #define PROTOCOL_VERSION_FROM_STRING(str) (str.toShort())
@@ -352,6 +344,83 @@ typedef struct Protocol{
 		// std::cout << std::endl;
 		file.close();
 		throw std::runtime_error("Malformed xml");
+	}
+	void writeDocument(QTextCursor &cursor) const {
+		QTextBlockFormat block_format;
+		block_format.setBottomMargin(5);
+		QTextCharFormat protocol_format;
+		protocol_format.setFontPointSize(protocol_format.font().pointSize() + 5);
+		protocol_format.setFontWeight(QFont::Bold);
+		protocol_format.setAnchorNames({name});
+		protocol_format.setAnchorHref("#" + name);
+		protocol_format.setAnchor(true);
+		QTextCharFormat interface_format;
+		interface_format.setFontPointSize(interface_format.font().pointSize() + 2);
+		interface_format.setFontWeight(QFont::Bold);
+		QTextCharFormat summary_format;
+		summary_format.setFontWeight(QFont::Bold);
+		QTextCharFormat content_format;
+		QFont monospace("monospace");
+		QTextCharFormat monospace_format;
+		monospace_format.setFont(monospace);
+
+		auto insertDescription = [&] (Description const& description) {
+			if (!description.summary.isEmpty()) {
+				cursor.insertText(description.summary, summary_format);
+				cursor.insertBlock();
+			}
+			if (!description.content.isEmpty()) {
+				cursor.insertMarkdown(description.content);
+				cursor.insertBlock();
+			}
+		};
+		cursor.setBlockFormat(block_format);
+		cursor.insertText(name, protocol_format);
+		cursor.insertBlock();
+		insertDescription(description);
+		for (Interface const &interface: interfaces) {
+			interface_format.setAnchor(true);
+			interface_format.setAnchorNames({interface.name});
+			interface_format.setAnchorHref("#" + interface.name);
+			cursor.insertText(interface.name, interface_format);
+			cursor.insertBlock();
+			insertDescription(interface.description);
+			for (Request const& request: interface.requests) {
+				cursor.insertText(request.signature(), monospace_format);
+				cursor.insertBlock();
+				insertDescription(request.description);
+				cursor.insertBlock();
+			}
+			for (Event const& event: interface.events) {
+				cursor.insertText(event.signature(), monospace_format);
+				cursor.insertBlock();
+				insertDescription(event.description);
+				cursor.insertBlock();
+			}
+			for (Enum const& e: interface.enums) {
+				cursor.insertText(e.name, monospace_format);
+				cursor.insertBlock();
+				QTextTable* table = cursor.insertTable(e.entries.size(), 3);
+				for (size_t i = 0; i < e.entries.size(); i++) {
+					Entry const& entry = e.entries[i];
+					cursor.insertText(entry.name);
+					cursor.movePosition(QTextCursor::NextCell);
+					cursor.insertText(entry.value);
+					cursor.movePosition(QTextCursor::NextCell);
+					cursor.insertText(entry.summary);
+					cursor.movePosition(QTextCursor::NextCell);
+				}
+				cursor.movePosition(QTextCursor::Down);
+				insertDescription(e.description);
+				cursor.insertBlock();
+			}
+		}
+		// cursor.insertText("Copyright", summary_format);
+		cursor.insertMarkdown(copyright);
+	}
+	void textDocument(QTextDocument *doc) const {
+		QTextCursor cursor(doc);
+		writeDocument(cursor);
 	}
 } Protocol;
 
