@@ -1,3 +1,4 @@
+#include <vector>
 #include <QFile>
 #include <QTextDocument>
 #include <QTextEdit>
@@ -363,6 +364,7 @@ typedef struct Protocol{
 		QFont monospace("monospace");
 		QTextCharFormat monospace_format;
 		monospace_format.setFont(monospace);
+		QTextCharFormat link_format = monospace_format;
 
 		auto insertDescription = [&] (Description const& description) {
 			if (!description.summary.isEmpty()) {
@@ -373,6 +375,47 @@ typedef struct Protocol{
 				cursor.insertMarkdown(description.content);
 				cursor.insertBlock();
 			}
+		};
+		auto insertArg = [&] (Arg const& arg) {
+			cursor.insertText(arg.name);
+			cursor.insertText(": ", monospace_format);
+			if(arg.allow_null) cursor.insertText("?");
+			cursor.insertText(arg.type);
+			if (arg.interface.length() != 0) {
+				cursor.insertText("<");
+				link_format.setAnchor(true);
+				link_format.setAnchorHref("#" + arg.interface);
+				cursor.insertText(arg.interface, link_format);
+				cursor.insertText(">", monospace_format);
+			}
+			if (arg.enum_name.length() != 0) {
+				cursor.insertText("<");
+				link_format.setAnchor(true);
+				link_format.setAnchorHref("#" + arg.enum_name);
+				cursor.insertText(arg.enum_name, link_format);
+				cursor.insertText(">", monospace_format);
+			}
+		};
+		auto insertEvent = [&] (Event const& event) {
+			link_format.setAnchorNames({event.name});
+			link_format.setAnchor(true);
+			link_format.setAnchorHref("#" + event.name);
+			cursor.insertText(event.name, link_format);
+			cursor.insertText("(", monospace_format);
+			std::vector<Arg>::const_iterator arg = event.args.cbegin();
+			if (arg != event.args.cend()) {
+				insertArg(*arg);
+				arg++;
+				while (arg != event.args.cend()) {
+					cursor.insertText(", ", monospace_format);
+					insertArg(*arg);
+					arg++;
+				}
+			}
+			cursor.insertText(")", monospace_format);
+			cursor.insertBlock();
+			insertDescription(event.description);
+			cursor.insertBlock();
 		};
 		cursor.setBlockFormat(block_format);
 		cursor.insertText(name, protocol_format);
@@ -385,20 +428,18 @@ typedef struct Protocol{
 			cursor.insertText(interface.name, interface_format);
 			cursor.insertBlock();
 			insertDescription(interface.description);
+			cursor.insertBlock();
 			for (Request const& request: interface.requests) {
-				cursor.insertText(request.signature(), monospace_format);
-				cursor.insertBlock();
-				insertDescription(request.description);
-				cursor.insertBlock();
+				insertEvent(request);
 			}
 			for (Event const& event: interface.events) {
-				cursor.insertText(event.signature(), monospace_format);
-				cursor.insertBlock();
-				insertDescription(event.description);
-				cursor.insertBlock();
+				insertEvent(event);
 			}
 			for (Enum const& e: interface.enums) {
-				cursor.insertText(e.name, monospace_format);
+				link_format.setAnchorNames({e.name});
+				link_format.setAnchor(true);
+				link_format.setAnchorHref("#" + e.name);
+				cursor.insertText(e.name, link_format);
 				cursor.insertBlock();
 				QTextTable* table = cursor.insertTable(e.entries.size(), 3);
 				for (size_t i = 0; i < e.entries.size(); i++) {
@@ -423,6 +464,25 @@ typedef struct Protocol{
 		writeDocument(cursor);
 	}
 } Protocol;
+
+typedef struct ProtocolDocument{
+	std::filesystem::path path;
+	Protocol protocol;
+	QTextDocument *document = nullptr;
+	ProtocolDocument(std::filesystem::path path): path(path), protocol(path), document(nullptr) {}
+
+	QTextDocument* getDocument() {
+		if (!document) {
+			document = new QTextDocument;
+			protocol.textDocument(document);
+		}
+		return this->document;
+	}
+
+	~ProtocolDocument() {
+		if (document) delete document;
+	}
+} ProtocolDocument;
 
 // Local Variables:
 // c-file-style: "awk"
