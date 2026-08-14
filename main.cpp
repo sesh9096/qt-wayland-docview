@@ -15,16 +15,18 @@
 
 class DocviewApplication : public QWidget {
 public:
-	DocviewApplication() : wayland("/usr/share/wayland/wayland.xml") {
-		// std::filesystem::path protocols_dir = "/usr/share/wayland-protocols";
+	DocviewApplication() {
+		protocols["core"].emplace_back("/usr/share/wayland/wayland.xml");
 		for(auto const& type: std::filesystem::directory_iterator{"/usr/share/wayland-protocols"})
 			for(auto const& subdir: std::filesystem::directory_iterator{type})
 				for(auto const& file: std::filesystem::directory_iterator{subdir.path()})
 					protocols[type.path().filename()].emplace_back(file.path());
 
+		line_edit = new QLineEdit;
 		toolbar.addAction(QIcon::fromTheme(QIcon::ThemeIcon::GoPrevious), "Previous");
 		toolbar.addAction(QIcon::fromTheme(QIcon::ThemeIcon::GoNext), "Next");
 		toolbar.addAction(QIcon::fromTheme(QIcon::ThemeIcon::GoHome), "Home");
+		toolbar.addWidget(line_edit);
 		QVBoxLayout *layout = new QVBoxLayout(this);
 		layout->setContentsMargins({});
 		layout->addWidget(&toolbar);
@@ -34,6 +36,9 @@ public:
 		text_edit.setOpenLinks(false);
 		text_edit.setDocument(&index);
 		text_edit.setWindowTitle("Wayland Docview");
+		// text_edit.setCornerWidget();
+		// QObject::connect(line_edit, &QLineEdit::textChanged, this, &DocviewApplication::searchTextChanged);
+		QObject::connect(line_edit, &QLineEdit::returnPressed, this, &DocviewApplication::searchReturnPressed);
 		QObject::connect(&this->text_edit, &QTextBrowser::anchorClicked, this, &DocviewApplication::handleAnchorClicked);
 		QObject::connect(&this->toolbar, &QToolBar::actionTriggered, this, &DocviewApplication::barActionTriggered);
 	}
@@ -46,21 +51,20 @@ public:
 		QTextCharFormat link_format;
 		link_format.setAnchor(true);
 		link_format.setFontUnderline(true);
-
-		cursor.insertText("core", heading_format);
-		link_format.setAnchorHref("wayland");
-		cursor.insertBlock();
-		cursor.insertText("wayland", link_format);
-		cursor.insertBlock();
+		QTextListFormat list_format;
+		list_format.setStyle(QTextListFormat::ListDisc);
 
 		for(auto const &pair: protocols) {
 			cursor.insertText(QString::fromStdString(pair.first), heading_format);
-			cursor.insertBlock();
+			QTextBlockFormat block_format = cursor.blockFormat();
+			cursor.setCharFormat(link_format);
+			cursor.insertList(list_format);
 			for(auto const &protocol: pair.second) {
 				link_format.setAnchorHref(protocol.protocol.name);
 				cursor.insertText(protocol.protocol.name, link_format);
 				cursor.insertBlock();
 			}
+			cursor.setBlockFormat(block_format);
 		}
 	}
 public slots:
@@ -85,13 +89,30 @@ public slots:
 			text_edit.forward();
 		}
 	}
+	// void searchTextChanged(const QString &text) {
+	// 	text_edit.find(text);
+	// 	// qDebug() << text;
+	// }
+	void searchReturnPressed() {
+		QString substr = line_edit->text();
+		if(!text_edit.find(substr)) {
+			QTextDocument *document = text_edit.document();
+			QTextCursor cur = document->find(substr);
+			if(!cur.isNull()) {
+				text_edit.moveCursor(QTextCursor::Start);
+				text_edit.find(substr);
+			}
+		}
+		// qDebug() << text;
+	}
 private:
 	QTextBrowser text_edit;
 	QToolBar toolbar;
 	// owned by toolbar
+	QLineEdit *line_edit = nullptr;
 	QTextDocument index;
-	ProtocolDocument wayland;
 	std::unordered_map<std::string, std::vector<ProtocolDocument>> protocols;
+	const char* phases[5] = {"core", "stable", "unstable", "staging", "experimental"};
 // signals:
 };
 
