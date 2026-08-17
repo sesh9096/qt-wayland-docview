@@ -1,5 +1,4 @@
 #include "protocol.hpp"
-#include <filesystem>
 #include <QApplication>
 #include <QLabel>
 #include <QLineEdit>
@@ -8,10 +7,24 @@
 #include <QScrollArea>
 #include <QStyleOption>
 #include <QTextBrowser>
+#include <QTextDocument>
+#include <QTextEdit>
 #include <QTextTable>
 #include <QToolBar>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <filesystem>
+
+typedef struct ProtocolDocument{
+	std::filesystem::path path;
+	Protocol protocol;
+	QTextDocument *document = nullptr;
+	ProtocolDocument(std::filesystem::path path): path(path), protocol(path), document(nullptr) {}
+
+	~ProtocolDocument() {
+		if (document) delete document;
+	}
+} ProtocolDocument;
 
 class DocviewApplication : public QWidget {
 public:
@@ -81,10 +94,138 @@ public:
 		phase_lookup[phase].push_back(pd);
 		for(auto const& interface: pd->protocol.interfaces) interface_lookup[interface.name] = pd;
 	}
+
+	QTextDocument* getDocument(ProtocolDocument *pd) {
+		if (!pd->document) createDocument(pd);
+		return pd->document;
+	}
+	void createDocument(ProtocolDocument *pd) {
+		pd->document = new QTextDocument;
+		QTextCursor cursor(pd->document);
+		Protocol &protocol = pd->protocol;
+		std::vector<Interface>const & interfaces = protocol.interfaces;
+
+		QTextBlockFormat block_format;
+		block_format.setBottomMargin(5);
+		QTextCharFormat protocol_format;
+		protocol_format.setFontPointSize(protocol_format.font().pointSize() + 5);
+		protocol_format.setFontWeight(QFont::Bold);
+		protocol_format.setAnchorNames({protocol.name});
+		protocol_format.setAnchorHref("#" + protocol.name);
+		protocol_format.setAnchor(true);
+		QTextCharFormat interface_format;
+		interface_format.setFontPointSize(interface_format.font().pointSize() + 2);
+		interface_format.setFontWeight(QFont::Bold);
+		QTextCharFormat summary_format;
+		summary_format.setFontWeight(QFont::Bold);
+		QTextCharFormat content_format;
+		QFont monospace("monospace");
+		QTextCharFormat monospace_format;
+		monospace_format.setFont(monospace);
+		QTextCharFormat link_format = monospace_format;
+
+		auto insertDescription = [&] (Description const& description) {
+			if (!description.summary.isEmpty()) {
+				cursor.insertText(description.summary, summary_format);
+				cursor.insertBlock();
+			}
+			if (!description.content.isEmpty()) {
+				cursor.insertMarkdown(description.content);
+				cursor.insertBlock();
+			}
+		};
+		auto insertArg = [&] (Arg const& arg) {
+			cursor.insertText(arg.name);
+			cursor.insertText(": ", monospace_format);
+			if (arg.allow_null) cursor.insertText("?");
+			cursor.insertText(arg.type);
+			if (arg.interface.length() != 0) {
+				cursor.insertText("<");
+				link_format.setAnchor(true);
+				if (std::find_if(interfaces.begin(), interfaces.end(), [=] (Interface const& i) {return i.name == arg.interface;}) == interfaces.end()) {
+					// find in other protocols
+					link_format.setAnchorHref(interface_lookup[arg.interface]->protocol.name + "#" + arg.interface);
+				} else {
+					link_format.setAnchorHref("#" + arg.interface);
+				}
+				cursor.insertText(arg.interface, link_format);
+				cursor.insertText(">", monospace_format);
+			}
+			if (arg.enum_name.length() != 0) {
+				cursor.insertText("<");
+				link_format.setAnchor(true);
+				link_format.setAnchorHref("#" + arg.enum_name);
+				cursor.insertText(arg.enum_name, link_format);
+				cursor.insertText(">", monospace_format);
+			}
+		};
+		auto insertEvent = [&] (Event const& event) {
+			link_format.setAnchorNames({event.name});
+			link_format.setAnchor(true);
+			link_format.setAnchorHref("#" + event.name);
+			cursor.insertText(event.name, link_format);
+			cursor.insertText("(", monospace_format);
+			std::vector<Arg>::const_iterator arg = event.args.cbegin();
+			if (arg != event.args.cend()) {
+				insertArg(*arg);
+				arg++;
+				while (arg != event.args.cend()) {
+					cursor.insertText(", ", monospace_format);
+					insertArg(*arg);
+					arg++;
+				}
+			}
+			cursor.insertText(")", monospace_format);
+			cursor.insertBlock();
+			insertDescription(event.description);
+			cursor.insertBlock();
+		};
+		cursor.setBlockFormat(block_format);
+		cursor.insertText(protocol.name, protocol_format);
+		cursor.insertBlock();
+		insertDescription(protocol.description);
+		for (Interface const &interface: interfaces) {
+			interface_format.setAnchor(true);
+			interface_format.setAnchorNames({interface.name});
+			interface_format.setAnchorHref("#" + interface.name);
+			cursor.insertText(interface.name, interface_format);
+			cursor.insertBlock();
+			insertDescription(interface.description);
+			cursor.insertBlock();
+			for (Request const& request: interface.requests) {
+				insertEvent(request);
+			}
+			for (Event const& event: interface.events) {
+				insertEvent(event);
+			}
+			for (Enum const& e: interface.enums) {
+				link_format.setAnchorNames({e.name});
+				link_format.setAnchor(true);
+				link_format.setAnchorHref("#" + e.name);
+				cursor.insertText(e.name, link_format);
+				cursor.insertBlock();
+				QTextTable* table = cursor.insertTable(e.entries.size(), 3);
+				for (size_t i = 0; i < e.entries.size(); i++) {
+					Entry const& entry = e.entries[i];
+					cursor.insertText(entry.name);
+					cursor.movePosition(QTextCursor::NextCell);
+					cursor.insertText(entry.value);
+					cursor.movePosition(QTextCursor::NextCell);
+					cursor.insertText(entry.summary);
+					cursor.movePosition(QTextCursor::NextCell);
+				}
+				cursor.movePosition(QTextCursor::Down);
+				insertDescription(e.description);
+				cursor.insertBlock();
+			}
+		}
+		// cursor.insertText("Copyright", summary_format);
+		cursor.insertMarkdown(protocol.copyright);
+	}
 public slots:
 	void handleAnchorClicked(const QUrl &link) {
 		QString path = link.path();
-		if(path.length() != 0) text_edit.setDocument(protocols[path]->getDocument());
+		if(path.length() != 0) text_edit.setDocument(getDocument(protocols[path]));
 		text_edit.scrollToAnchor(link.fragment());
 	}
 	void barActionTriggered(QAction *action) {
