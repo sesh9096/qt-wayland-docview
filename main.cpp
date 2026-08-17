@@ -16,11 +16,11 @@
 class DocviewApplication : public QWidget {
 public:
 	DocviewApplication() {
-		protocols["core"].emplace_back("/usr/share/wayland/wayland.xml");
+		addProtocol("/usr/share/wayland/wayland.xml", "core");
 		for(auto const& type: std::filesystem::directory_iterator{"/usr/share/wayland-protocols"})
 			for(auto const& subdir: std::filesystem::directory_iterator{type})
 				for(auto const& file: std::filesystem::directory_iterator{subdir.path()})
-					protocols[type.path().filename()].emplace_back(file.path());
+					addProtocol(file.path(), type.path().filename());
 
 		line_edit = new QLineEdit;
 		toolbar.addAction(QIcon::fromTheme(QIcon::ThemeIcon::GoPrevious), "Previous");
@@ -42,8 +42,15 @@ public:
 		QObject::connect(&this->text_edit, &QTextBrowser::anchorClicked, this, &DocviewApplication::handleAnchorClicked);
 		QObject::connect(&this->toolbar, &QToolBar::actionTriggered, this, &DocviewApplication::barActionTriggered);
 	}
+	~DocviewApplication() {
+		for(auto pair: protocols) {
+			delete pair.second;
+		}
+	}
 	void createIndex() {
 		index.clear();
+		// default 40
+		index.setIndentWidth(10);
 		QTextCursor cursor(&index);
 		QTextCharFormat heading_format;
 		heading_format.setFontPointSize(heading_format.font().pointSize() + 2);
@@ -54,31 +61,31 @@ public:
 		QTextListFormat list_format;
 		list_format.setStyle(QTextListFormat::ListDisc);
 
-		for(auto const &pair: protocols) {
-			cursor.insertText(QString::fromStdString(pair.first), heading_format);
+		for(auto const &phase: phases) {
+			if(phase_lookup.count(phase) == 0) continue;
+			cursor.insertText(phase, heading_format);
 			QTextBlockFormat block_format = cursor.blockFormat();
 			cursor.setCharFormat(link_format);
 			cursor.insertList(list_format);
-			for(auto const &protocol: pair.second) {
-				link_format.setAnchorHref(protocol.protocol.name);
-				cursor.insertText(protocol.protocol.name, link_format);
+			for(auto const &pd: phase_lookup[phase]) {
+				link_format.setAnchorHref(pd->protocol.name);
+				cursor.insertText(pd->protocol.name, link_format);
 				cursor.insertBlock();
 			}
 			cursor.setBlockFormat(block_format);
 		}
 	}
+	void addProtocol(std::filesystem::path const& path, std::string const& phase = "custom") {
+		ProtocolDocument *pd = new ProtocolDocument(path);
+		protocols[pd->protocol.name] = pd;
+		phase_lookup[phase].push_back(pd);
+		for(auto const& interface: pd->protocol.interfaces) interface_lookup[interface.name] = pd;
+	}
 public slots:
 	void handleAnchorClicked(const QUrl &link) {
-		for(auto &pair: protocols) {
-			for(auto &protocol: pair.second) {
-				if(link == protocol.protocol.name) {
-					text_edit.setDocument(protocol.getDocument());
-					return;
-				}
-			}
-		}
+		QString path = link.path();
+		if(path.length() != 0) text_edit.setDocument(protocols[path]->getDocument());
 		text_edit.scrollToAnchor(link.fragment());
-		qDebug() << link;
 	}
 	void barActionTriggered(QAction *action) {
 		if(action->iconText() == "Home") {
@@ -111,7 +118,9 @@ private:
 	// owned by toolbar
 	QLineEdit *line_edit = nullptr;
 	QTextDocument index;
-	std::unordered_map<std::string, std::vector<ProtocolDocument>> protocols;
+	std::unordered_map<QString, ProtocolDocument*> protocols;
+	std::unordered_map<std::string, std::vector<ProtocolDocument*>> phase_lookup;
+	std::unordered_map<QString, ProtocolDocument*> interface_lookup;
 	const char* phases[5] = {"core", "stable", "unstable", "staging", "experimental"};
 // signals:
 };
