@@ -45,6 +45,7 @@ public:
 		layout->addWidget(&toolbar);
 		layout->addWidget(&text_edit);
 
+		createFormatting();
 		createIndex();
 		text_edit.setOpenLinks(false);
 		text_edit.setDocument(&index);
@@ -59,6 +60,17 @@ public:
 		for(auto pair: protocols) {
 			delete pair.second;
 		}
+	}
+	void createFormatting() {
+		block_format.setBottomMargin(5);
+		protocol_format.setFontPointSize(protocol_format.font().pointSize() + 5);
+		protocol_format.setFontWeight(QFont::Bold);
+		protocol_format.setAnchor(true);
+		interface_format.setFontPointSize(interface_format.font().pointSize() + 2);
+		interface_format.setFontWeight(QFont::Bold);
+		summary_format.setFontWeight(QFont::Bold);
+		QFont monospace("monospace");
+		monospace_format.setFont(monospace);
 	}
 	void createIndex() {
 		index.clear();
@@ -104,25 +116,10 @@ public:
 		QTextCursor cursor(pd->document);
 		Protocol &protocol = pd->protocol;
 		std::vector<Interface>const & interfaces = protocol.interfaces;
-
-		QTextBlockFormat block_format;
-		block_format.setBottomMargin(5);
-		QTextCharFormat protocol_format;
-		protocol_format.setFontPointSize(protocol_format.font().pointSize() + 5);
-		protocol_format.setFontWeight(QFont::Bold);
 		protocol_format.setAnchorNames({protocol.name});
 		protocol_format.setAnchorHref("#" + protocol.name);
-		protocol_format.setAnchor(true);
-		QTextCharFormat interface_format;
-		interface_format.setFontPointSize(interface_format.font().pointSize() + 2);
-		interface_format.setFontWeight(QFont::Bold);
-		QTextCharFormat summary_format;
-		summary_format.setFontWeight(QFont::Bold);
-		QTextCharFormat content_format;
-		QFont monospace("monospace");
-		QTextCharFormat monospace_format;
-		monospace_format.setFont(monospace);
 		QTextCharFormat link_format = monospace_format;
+		link_format.setAnchor(true);
 
 		auto insertDescription = [&] (Description const& description) {
 			if (!description.summary.isEmpty()) {
@@ -144,7 +141,12 @@ public:
 				link_format.setAnchor(true);
 				if (std::find_if(interfaces.begin(), interfaces.end(), [=] (Interface const& i) {return i.name == arg.interface;}) == interfaces.end()) {
 					// find in other protocols
-					link_format.setAnchorHref(interface_lookup[arg.interface]->protocol.name + "#" + arg.interface);
+					if (interface_lookup.count(arg.interface)) {
+						link_format.setAnchorHref(interface_lookup.at(arg.interface)->protocol.name + "#" + arg.interface);
+					} else {
+						// unknown
+						link_format.setAnchorHref("");
+					}
 				} else {
 					link_format.setAnchorHref("#" + arg.interface);
 				}
@@ -153,7 +155,6 @@ public:
 			}
 			if (arg.enum_name.length() != 0) {
 				cursor.insertText("<");
-				link_format.setAnchor(true);
 				link_format.setAnchorHref("#" + arg.enum_name);
 				cursor.insertText(arg.enum_name, link_format);
 				cursor.insertText(">", monospace_format);
@@ -200,7 +201,6 @@ public:
 			}
 			for (Enum const& e: interface.enums) {
 				link_format.setAnchorNames({e.name});
-				link_format.setAnchor(true);
 				link_format.setAnchorHref("#" + e.name);
 				cursor.insertText(e.name, link_format);
 				cursor.insertBlock();
@@ -263,6 +263,12 @@ private:
 	std::unordered_map<std::string, std::vector<ProtocolDocument*>> phase_lookup;
 	std::unordered_map<QString, ProtocolDocument*> interface_lookup;
 	const char* phases[5] = {"core", "stable", "unstable", "staging", "experimental"};
+	QTextBlockFormat block_format;
+	QTextCharFormat protocol_format;
+	QTextCharFormat interface_format;
+	QTextCharFormat summary_format;
+	QTextCharFormat content_format;
+	QTextCharFormat monospace_format;
 // signals:
 };
 
