@@ -113,6 +113,7 @@ public:
 	}
 	void createDocument(ProtocolDocument *pd) {
 		pd->document = new QTextDocument;
+		pd->document->setMetaInformation(QTextDocument::DocumentTitle, pd->protocol.name);
 		QTextCursor cursor(pd->document);
 		Protocol &protocol = pd->protocol;
 		std::vector<Interface>const & interfaces = protocol.interfaces;
@@ -223,18 +224,24 @@ public:
 		cursor.insertMarkdown(protocol.copyright);
 	}
 public slots:
-	void handleAnchorClicked(const QUrl &link) {
+	void gotoLink(const QUrl &link) {
 		QString path = link.path();
 		if(path.length() != 0) text_edit.setDocument(getDocument(protocols[path]));
-		text_edit.scrollToAnchor(link.fragment());
+		if(link.hasFragment()) text_edit.scrollToAnchor(link.fragment());
+		// qDebug() << link;
+	}
+	void handleAnchorClicked(const QUrl &link) {
+		gotoLink(link);
+		history.resize(++history_index);
+		history.emplace_back(text_edit.documentTitle() + (link.hasFragment()?("#" + link.fragment()):""));
 	}
 	void barActionTriggered(QAction *action) {
 		if(action->iconText() == "Home") {
 			text_edit.setDocument(&index);
 		} else if(action->iconText() == "Previous") {
-			text_edit.backward();
+			if(history_index > 0) gotoLink(history[--history_index]);
 		} else if(action->iconText() == "Next") {
-			text_edit.forward();
+			if(history_index < history.size()-1) gotoLink(history[++history_index]);
 		}
 	}
 	// void searchTextChanged(const QString &text) {
@@ -243,12 +250,13 @@ public slots:
 	// }
 	void searchReturnPressed() {
 		QString substr = line_edit->text();
-		if(!text_edit.find(substr)) {
-			QTextDocument *document = text_edit.document();
-			QTextCursor cur = document->find(substr);
+		QTextDocument::FindFlag flags = (QGuiApplication::keyboardModifiers() & Qt::ShiftModifier) ? QTextDocument::FindBackward : (QTextDocument::FindFlag)0;
+		if(!text_edit.find(substr, flags)) {
+			// now need to wrap around
+			QTextCursor cur = text_edit.document()->find(substr);
 			if(!cur.isNull()) {
-				text_edit.moveCursor(QTextCursor::Start);
-				text_edit.find(substr);
+				text_edit.moveCursor((flags == QTextDocument::FindBackward) ? QTextCursor::End : QTextCursor::Start);
+				text_edit.find(substr, flags);
 			}
 		}
 		// qDebug() << text;
@@ -258,6 +266,8 @@ private:
 	QToolBar toolbar;
 	// owned by toolbar
 	QLineEdit *line_edit = nullptr;
+	std::vector<QUrl> history;
+	int history_index = 0;
 	QTextDocument index;
 	std::unordered_map<QString, ProtocolDocument*> protocols;
 	std::unordered_map<std::string, std::vector<ProtocolDocument*>> phase_lookup;
